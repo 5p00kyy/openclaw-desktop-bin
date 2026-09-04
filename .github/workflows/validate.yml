@@ -1,0 +1,22 @@
+name: Validate package
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Run updater parser tests
+        run: ./scripts/run-tests.sh
+      - name: Build and lint in clean Arch
+        run: ./scripts/docker-build.sh
+      - name: Install and validate in a fresh Arch container
+        run: ./scripts/docker-install-test.sh

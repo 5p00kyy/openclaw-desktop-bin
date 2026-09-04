@@ -1,0 +1,13 @@
+{
+  "tag_name": "v2026.9.0",
+  "draft": false,
+  "prerelease": true,
+  "assets": [
+    {
+      "name": "OpenClaw-2026.9.0-amd64.deb",
+      "state": "uploaded",
+      "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "browser_download_url": "https://github.com/openclaw/openclaw/releases/download/v2026.9.0/OpenClaw-2026.9.0-amd64.deb"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "tag_name": "v2026.8.3",
+  "draft": false,
+  "prerelease": false,
+  "assets": [
+    {
+      "name": "OpenClaw-2026.8.3-amd64.deb",
+      "state": "uploaded",
+      "browser_download_url": "https://github.com/openclaw/openclaw/releases/download/v2026.8.3/OpenClaw-2026.8.3-amd64.deb"
+    }
+  ]
+}

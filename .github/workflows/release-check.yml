@@ -1,0 +1,55 @@
+name: Check upstream release
+
+on:
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Validate latest stable release
+        id: release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          python3 scripts/update-release.py --check --json-out "$RUNNER_TEMP/release-check.json"
+          status=$?
+          set -e
+          case "$status" in
+            0) echo "newer=false" >> "$GITHUB_OUTPUT" ;;
+            10) echo "newer=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "upstream check failed" >&2; exit "$status" ;;
+          esac
+          cat "$RUNNER_TEMP/release-check.json"
+      - name: Open or update the single release-review issue
+        if: steps.release.outputs.newer == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(python3 -c 'import json; print(json.load(open("'"$RUNNER_TEMP"'/release-check.json"))["target_version"])')
+          title="Release update: openclaw-desktop-bin ${version}"
+          body=$(mktemp)
+          {
+            echo "A newer stable upstream release passed the asset and SHA-256 validation: **${version}**."
+            echo
+            echo 'The maintainer must run the updater in Arch, review the PKGBUILD/.SRCINFO diff, rerun the clean build and install checks, and commit the result.'
+            echo
+            cat "$RUNNER_TEMP/release-check.json"
+          } > "$body"
+          issue=$(gh issue list --state open --search '"Release update: openclaw-desktop-bin" in:title' --json number --limit 1 --jq '.[0].number')
+          if [[ -n "$issue" ]]; then
+            gh issue edit "$issue" --title "$title" --body-file "$body"
+          else
+            gh issue create --title "$title" --body-file "$body"
+          fi
