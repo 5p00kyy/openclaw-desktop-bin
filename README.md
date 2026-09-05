@@ -1,66 +1,50 @@
-# openclaw-desktop-bin
+# openclaw-desktop
 
-Unofficial Arch Linux packaging for the official OpenClaw Linux desktop companion. The package repackages the upstream prebuilt x86_64 Debian release, currently `v2026.8.2`, as `openclaw-desktop-bin`.
+Unofficial Arch Linux source package for the official OpenClaw Linux desktop companion.
 
-This is community packaging, not an official OpenClaw or Arch project. Report application bugs upstream at [openclaw/openclaw](https://github.com/openclaw/openclaw); report packaging problems here.
+This package builds the companion from the upstream release tag instead of repackaging a prebuilt Debian artifact. It is community packaging, not an official OpenClaw or Arch project. Report application bugs upstream at [openclaw/openclaw](https://github.com/openclaw/openclaw); report packaging problems here.
 
-## Scope and coexistence
+## Why this is source-built
 
-- Installs the upstream desktop executable, launcher, icons, desktop entry, and the upstream CLI installer helper.
-- Targets x86_64 only and has no source compilation.
-- Depends on the Arch equivalents of the runtime libraries declared by the upstream `.deb`, plus the executable's directly linked libraries and its helper script's Bash runtime.
-- Coexists with the AUR `openclaw` CLI/Gateway package. This package neither provides nor conflicts with `openclaw`, and does not install its CLI, systemd units, or configuration. The CLI is an optional dependency because the companion can use an existing `openclaw` executable from `PATH`.
-- Has no install-time network access beyond makepkg downloading the declared, checksum-pinned release source. It has no post-install service starts, configuration edits, or self-update hook.
+The first official Linux binary, `v2026.8.2`, contains [upstream bug #135565](https://github.com/openclaw/openclaw/issues/135565): a fresh installation without a CLI can hide the manual remote-Gateway setup and show only the local CLI installer. Upstream merged [fix #135650](https://github.com/openclaw/openclaw/pull/135650) before `v2026.9.1`, but did not publish a Linux `.deb` or AppImage for that release.
 
-The upstream application can link users to releases, but package-managed installations do not self-update. Update this package through the review process below.
+This package builds the fixed tagged source, runs the upstream Rust test suite, and runs a package-specific native first-run regression test derived from upstream's AT-SPI harness. The native test verifies that a clean environment with no OpenClaw CLI can choose **On another computer**, see both URL and SSH transports, and reach the remote validation flow without invoking the installer.
+
+## Package boundaries
+
+The desktop companion and the OpenClaw CLI/Gateway are separate packages, but they are intentionally integrated upstream.
+
+- Remote mode does not require a local CLI or local Gateway.
+- Local mode requires a CLI. The application can use an existing `openclaw` executable or install a managed Node runtime and CLI under `~/.openclaw` after explicit user interaction.
+- Pacman installation does not run the bundled installer, start services, edit user configuration, or contact the network beyond makepkg fetching declared source and locked build dependencies.
+- The package conflicts with and replaces `openclaw-desktop-bin`, but neither provides nor conflicts with the separate `openclaw` CLI package.
+
+## Remote Gateways
+
+Choose **On another computer** on first launch. Connect using one of:
+
+1. A private HTTPS endpoint such as Tailscale Serve.
+2. The built-in SSH tunnel transport, with `openssh` installed and key authentication configured.
+3. Bonjour/mDNS discovery from a directly reachable Gateway. Bonjour advertising is opt-in on Linux Gateway hosts.
+
+A nearby-Gateway list is not a general network scan. A loopback-only Gateway with no Bonjour advertisement will not appear there, but the manual URL and SSH forms remain available in this fixed build.
 
 ## Build and validation
 
-Run these commands from any Linux environment with Docker available:
+Run the clean Arch build, including the native no-CLI remote first-run test:
 
 ```sh
-./scripts/run-tests.sh
 ./scripts/docker-build.sh
-./scripts/docker-install-test.sh
 ```
 
-`docker-build.sh` starts a fresh `archlinux:base-devel` container, installs only validation/build tools there, builds with makepkg, runs namcap against the PKGBUILD and package, and stores ignored results under `.artifacts/`. `docker-install-test.sh` installs that package into a separate fresh Arch container and checks package ownership, the complete installed file list, desktop-file validity, ELF dependency resolution, and the known CLI package paths.
+The build fetches Cargo dependencies according to upstream's locked manifest during `prepare()`, then compiles with Cargo offline and frozen. Artifacts and `namcap` output are written under ignored `.artifacts/`.
 
-The expected namcap warnings are limited to preserving the upstream binary unstripped, its ELF interpreter being reported as an unused library, Bash being detected through an `/usr/bin/env` shebang, and runtime-loaded GStreamer/AppIndicator components not being visible in the ELF dependency table. Those dependencies are intentional. Treat any additional warning as a review item.
+Current `namcap` output contains only reviewed warnings: Bash is explicitly declared for the bundled helper despite contradictory shebang detection; the ELF interpreter warning is a loader-path false positive; GStreamer codecs are runtime-loaded by WebKitGTK; and Ayatana AppIndicator is runtime-loaded by the tray integration.
 
-To regenerate metadata after any PKGBUILD change, never hand-edit `.SRCINFO`. The helper uses local `makepkg` on Arch and otherwise runs it in Docker:
+The release checker is advisory. It detects a newer stable source tag and creates a review issue, but deliberately does not alter `PKGBUILD` or trust a remote tag as a package checksum. A maintainer must download the candidate source, pin its digest, review the source changes, regenerate `.SRCINFO`, and pass the complete validation gate.
 
-```sh
-./scripts/regenerate-srcinfo.sh
-```
+Regenerate `.SRCINFO` with makepkg after every PKGBUILD change. Never edit it by hand.
 
-## Release updates
+## Maintenance policy
 
-The updater validates the release tag, stable/non-draft status, exact upstream `.deb` filename, official download URL, GitHub's SHA-256 asset digest, and the digest of downloaded bytes. It edits only `PKGBUILD` and regenerates `.SRCINFO` with `makepkg --printsrcinfo`. It never commits, pushes, publishes, opens an issue, or touches AUR state.
-
-For a live check of the latest stable release:
-
-```sh
-./scripts/update-release.py --check
-```
-
-For a deterministic, human-directed update:
-
-```sh
-./scripts/update-release.py 2026.8.3
-# inspect the diff, then rerun the clean tests/build/install validation
-```
-
-An explicit version still requires a matching stable GitHub release and exact `.deb` asset. Missing assets, missing digests, digest mismatches, prereleases, drafts, and non-official URLs fail closed. The current `v2026.8.2` release is intentionally a no-op; upstream `v2026.8.1` did not have a Linux desktop asset, so there is no fabricated 8.1-to-8.2 package history.
-
-The scheduled/manual GitHub Actions release check is deliberately quiet when current. It can create or update one release-review issue only after a newer valid release has passed those checks. It does not modify the repository, push to AUR, or create a package automatically. A maintainer must review the generated diff and run the validation gates before committing.
-
-## Maintainer checklist
-
-1. Run the updater, or run the current/no-op check.
-2. Review `git diff`, including the source URL, checksum, dependency changes, and `.SRCINFO`.
-3. Run `./scripts/run-tests.sh`, `./scripts/docker-build.sh`, and `./scripts/docker-install-test.sh`.
-4. Inspect the namcap report and investigate every actionable warning.
-5. Use a clear conventional commit, then submit through the intended human AUR workflow if desired.
-
-Automation here is quiet plumbing, not user-facing AI or automation theatre. It prepares evidence and a reviewable change; a human owns release judgment and publication.
+Upstream release tags are reviewed manually before updates. A daily workflow detects a newer stable tag and opens or updates one review issue, but it never edits package files or publishes to GitHub or AUR. Every update requires source review, checksum refresh, clean build, native first-run test, package installation test, `ldd`, desktop-file validation, and human approval.

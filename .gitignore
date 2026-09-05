@@ -1,18 +1,8 @@
-# makepkg output
-*.pkg.tar.*
-*.src.tar.*
-src/
-pkg/
-
-# Local validation output and transient updater state
 .artifacts/
 .evidence/
-.update-*/
-*.log
-
-# Editor, Python, and OS noise
 __pycache__/
-*.pyc
-*.swp
-*~
-.DS_Store
+*.py[cod]
+*.tar.gz
+src/
+pkg/
+*.pkg.tar.*

@@ -10,13 +10,13 @@ permissions:
 jobs:
   package:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
-      - name: Run updater parser tests
+      - name: Test release checker
         run: ./scripts/run-tests.sh
-      - name: Build and lint in clean Arch
+      - name: Build and test in clean Arch
         run: ./scripts/docker-build.sh
       - name: Install and validate in a fresh Arch container
         run: ./scripts/docker-install-test.sh

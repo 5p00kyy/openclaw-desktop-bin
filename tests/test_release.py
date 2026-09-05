@@ -1,55 +1,70 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+from contextlib import redirect_stdout
+import importlib.util
+import io
 import json
 from pathlib import Path
-import sys
+from types import SimpleNamespace
+import tempfile
 import unittest
+from unittest.mock import patch
 
-sys.path.insert(0, str(Path(__file__).parents[1] / "scripts" / "lib"))
-from release import ReleaseError, validate_release, version_from_tag, version_tuple  # noqa: E402
-
-FIXTURES = Path(__file__).parent / "fixtures"
-
-
-def fixture(name: str) -> dict:
-    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+REPO = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location("check_release", REPO / "scripts/check-release.py")
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
 
 
-class ReleaseValidationTests(unittest.TestCase):
-    def test_current_release_is_valid_and_extracts_digest(self) -> None:
-        asset = validate_release(fixture("current.json"), "2026.8.2")
-        self.assertEqual(asset.name, "OpenClaw-2026.8.2-amd64.deb")
-        self.assertEqual(asset.digest, "6021ac38b398fc3b4c1364f72fb83a5d89e2d6c20ed6bbe6d3ceed0cddbeaa85")
+class ReleaseTests(unittest.TestCase):
+    def fixture(self, name: str) -> dict:
+        return json.loads((Path(__file__).parent / "fixtures" / name).read_text())
 
-    def test_newer_stable_release_is_valid(self) -> None:
-        asset = validate_release(fixture("newer-stable.json"), "2026.8.3")
-        self.assertEqual(version_tuple(asset.version), (2026, 8, 3))
+    def test_current_stable_release(self) -> None:
+        self.assertEqual(module.validate_release(self.fixture("current.json")), "2026.9.1")
+
+    def test_newer_stable_release(self) -> None:
+        version = module.validate_release(self.fixture("newer.json"))
+        self.assertGreater(module.version_tuple(version), module.version_tuple("2026.9.1"))
 
     def test_prerelease_is_rejected(self) -> None:
-        with self.assertRaisesRegex(ReleaseError, "prereleases"):
-            validate_release(fixture("prerelease.json"), "2026.9.0")
+        with self.assertRaisesRegex(module.ReleaseError, "prereleases"):
+            module.validate_release(self.fixture("prerelease.json"))
 
-    def test_missing_asset_is_rejected(self) -> None:
-        with self.assertRaisesRegex(ReleaseError, "missing exactly one"):
-            validate_release(fixture("missing-asset.json"), "2026.8.3")
+    def test_version_parser_is_strict(self) -> None:
+        for invalid in ("2026.9", "v2026.9.1", "2026.09.x"):
+            with self.subTest(invalid=invalid), self.assertRaises(module.ReleaseError):
+                module.version_tuple(invalid)
 
-    def test_missing_digest_is_rejected(self) -> None:
-        with self.assertRaisesRegex(ReleaseError, "missing a valid sha256 digest"):
-            validate_release(fixture("missing-digest.json"), "2026.8.3")
+    def test_malformed_release_is_rejected(self) -> None:
+        with self.assertRaisesRegex(module.ReleaseError, "v-prefixed"):
+            module.validate_release({"tag_name": "2026.9.2"})
 
-    def test_wrong_tag_is_rejected(self) -> None:
-        payload = fixture("current.json")
-        payload["tag_name"] = "v2026.8.1"
-        with self.assertRaisesRegex(ReleaseError, "does not match"):
-            validate_release(payload, "2026.8.2")
+    def run_main(self, fixture: str) -> tuple[int, dict, str]:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "result.json"
+            args = SimpleNamespace(
+                release_json=Path(__file__).parent / "fixtures" / fixture,
+                json_out=output,
+            )
+            stdout = io.StringIO()
+            with patch.object(module, "parse_args", return_value=args), redirect_stdout(stdout):
+                status = module.main()
+            return status, json.loads(output.read_text()), stdout.getvalue()
 
-    def test_tag_and_version_parser_are_strict(self) -> None:
-        self.assertEqual(version_from_tag("v2026.8.2"), "2026.8.2")
-        with self.assertRaises(ReleaseError):
-            version_from_tag("2026.8.2")
-        with self.assertRaises(ReleaseError):
-            version_tuple("2026.8")
+    def test_main_reports_current_release(self) -> None:
+        status, result, stdout = self.run_main("current.json")
+        self.assertEqual(status, 0)
+        self.assertFalse(result["newer"])
+        self.assertEqual(json.loads(stdout), result)
+
+    def test_main_uses_distinct_exit_for_newer_release(self) -> None:
+        status, result, stdout = self.run_main("newer.json")
+        self.assertEqual(status, module.CHECK_NEWER_EXIT)
+        self.assertTrue(result["newer"])
+        self.assertEqual(json.loads(stdout), result)
 
 
 if __name__ == "__main__":
