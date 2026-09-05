@@ -1,36 +1,34 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
-artifact_dir="$repo_dir/.artifacts"
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+artifact_dir="${root}/.artifacts"
 mkdir -p "$artifact_dir"
-rm -f "$artifact_dir"/*
-
-image=${ARCH_IMAGE:-archlinux:base-devel}
-docker pull "$image" >/dev/null
+find "$artifact_dir" -maxdepth 1 -type f \
+  \( -name 'openclaw-desktop-*.pkg.tar.*' -o -name 'namcap.txt' -o -name 'package.sha256' \) \
+  -delete
 
 docker run --rm \
-  --volume "$repo_dir:/src:ro" \
-  --volume "$artifact_dir:/out" \
-  --env ARCH_IMAGE="$image" \
-  "$image" \
-  bash -ceu '
-    pacman -Syu --noconfirm --needed base-devel namcap desktop-file-utils binutils python
-    pacman -S --noconfirm --needed gst-libav gst-plugins-bad gst-plugins-good gtk3 libayatana-appindicator webkit2gtk-4.1
-    rm -rf /build
-    mkdir -p /build
-    cp -a /src/. /build/
+  -v "${root}:/input:ro" \
+  -v "${root}/.artifacts:/output" \
+  archlinux:base-devel \
+  bash -euo pipefail -c '
+    pacman -Syu --noconfirm --needed \
+      at-spi2-core bash cairo dbus gdk-pixbuf2 git glib2 gst-libav \
+      gst-plugins-bad gst-plugins-good gtk3 hicolor-icon-theme \
+      libayatana-appindicator libsoup3 namcap nodejs pkgconf python-gobject rust \
+      webkit2gtk-4.1 xorg-server-xvfb xorg-xauth
     useradd --create-home builder
+    install -d -o builder -g builder /build
+    cp -a /input/. /build/
+    rm -rf /build/.artifacts /build/src /build/pkg
     chown -R builder:builder /build
-    # Install dependencies as container root, then keep makepkg unprivileged.
-    su builder -s /bin/bash -c "cd /build && makepkg --nodeps --noconfirm --clean --cleanbuild --force"
-    mapfile -t packages < <(find /build -maxdepth 1 -type f -name "*.pkg.tar.*" -print)
-    test "${#packages[@]}" -eq 1
-    namcap /build/PKGBUILD "${packages[0]}" | tee /out/namcap.txt
-    cp "${packages[0]}" /out/
-    sha256sum "${packages[0]}" | tee /out/package.sha256
+    su builder -c "cd /build && makepkg --cleanbuild --noconfirm"
+    mapfile -t packages < <(find /build -maxdepth 1 -type f \
+      -name "openclaw-desktop-[0-9]*.pkg.tar.zst" ! -name "*-debug-*" -print)
+    ((${#packages[@]} == 1))
+    package=${packages[0]}
+    namcap /build/PKGBUILD "$package" | tee /output/namcap.txt
+    cp "$package" /output/
+    sha256sum "$package" | tee /output/package.sha256
   '
-
-printf 'Built package(s):\n'
-find "$artifact_dir" -maxdepth 1 -type f -name '*.pkg.tar.*' -printf '  %f\n'
-printf 'Namcap report: %s\n' "$artifact_dir/namcap.txt"

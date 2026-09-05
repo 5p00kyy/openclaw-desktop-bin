@@ -2,7 +2,7 @@ name: Check upstream release
 
 on:
   schedule:
-    - cron: '17 4 * * 1'
+    - cron: '17 4 * * *'
   workflow_dispatch:
 
 permissions:
@@ -16,14 +16,16 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
-      - name: Validate latest stable release
+      - name: Test release checker
+        run: ./scripts/run-tests.sh
+      - name: Check latest stable source tag
         id: release
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set +e
-          python3 scripts/update-release.py --check --json-out "$RUNNER_TEMP/release-check.json"
+          python3 scripts/check-release.py --json-out "$RUNNER_TEMP/release-check.json"
           status=$?
           set -e
           case "$status" in
@@ -31,23 +33,24 @@ jobs:
             10) echo "newer=true" >> "$GITHUB_OUTPUT" ;;
             *) echo "upstream check failed" >&2; exit "$status" ;;
           esac
-          cat "$RUNNER_TEMP/release-check.json"
-      - name: Open or update the single release-review issue
+      - name: Open or update the release-review issue
         if: steps.release.outputs.newer == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           version=$(python3 -c 'import json; print(json.load(open("'"$RUNNER_TEMP"'/release-check.json"))["target_version"])')
-          title="Release update: openclaw-desktop-bin ${version}"
+          title="Release update: openclaw-desktop ${version}"
           body=$(mktemp)
           {
-            echo "A newer stable upstream release passed the asset and SHA-256 validation: **${version}**."
+            echo "A newer stable OpenClaw source tag is available: **${version}**."
             echo
-            echo 'The maintainer must run the updater in Arch, review the PKGBUILD/.SRCINFO diff, rerun the clean build and install checks, and commit the result.'
+            echo 'Review upstream Linux changes and the first-run regression test, refresh checksums and .SRCINFO, then run the clean build, package installation checks, and native remote-onboarding test. Do not publish automatically.'
             echo
+            echo '```json'
             cat "$RUNNER_TEMP/release-check.json"
+            echo '```'
           } > "$body"
-          issue=$(gh issue list --state open --search '"Release update: openclaw-desktop-bin" in:title' --json number --limit 1 --jq '.[0].number')
+          issue=$(gh issue list --state open --search '"Release update: openclaw-desktop" in:title' --json number --limit 1 --jq '.[0].number')
           if [[ -n "$issue" ]]; then
             gh issue edit "$issue" --title "$title" --body-file "$body"
           else

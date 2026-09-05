@@ -3,11 +3,14 @@ set -euo pipefail
 
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
 artifact_dir="$repo_dir/.artifacts"
-package=$(find "$artifact_dir" -maxdepth 1 -type f -name '*.pkg.tar.*' -print -quit)
-if [[ -z "$package" ]]; then
-  printf 'no built package found; run scripts/docker-build.sh first\n' >&2
+mapfile -t packages < <(find "$artifact_dir" -maxdepth 1 -type f \
+  -name 'openclaw-desktop-[0-9]*.pkg.tar.*' ! -name '*-debug-*' -print)
+if ((${#packages[@]} != 1)); then
+  printf 'expected one source-built package; found %d; run scripts/docker-build.sh first\n' \
+    "${#packages[@]}" >&2
   exit 1
 fi
+package=${packages[0]}
 
 image=${ARCH_IMAGE:-archlinux:base-devel}
 docker pull "$image" >/dev/null
@@ -18,21 +21,24 @@ docker run --rm \
   bash -ceu '
     pacman -Syu --noconfirm --needed base-devel desktop-file-utils binutils
     pacman -S --noconfirm --needed gst-libav gst-plugins-bad gst-plugins-good gtk3 libayatana-appindicator webkit2gtk-4.1
-    package=$(find /artifacts -maxdepth 1 -type f -name "*.pkg.tar.*" -print -quit)
+    mapfile -t packages < <(find /artifacts -maxdepth 1 -type f \
+      -name "openclaw-desktop-[0-9]*.pkg.tar.*" ! -name "*-debug-*" -print)
+    ((${#packages[@]} == 1))
+    package=${packages[0]}
     pacman -U --noconfirm "$package"
-    pacman -Qkk openclaw-desktop-bin
+    pacman -Qkk openclaw-desktop
 
     expected=(
       /usr/bin/openclaw-desktop
       /usr/lib/OpenClaw/install-cli.sh
       /usr/share/applications/OpenClaw.desktop
-      /usr/share/licenses/openclaw-desktop-bin/LICENSE
+      /usr/share/licenses/openclaw-desktop/LICENSE
       /usr/share/icons/hicolor/32x32/apps/openclaw-desktop.png
       /usr/share/icons/hicolor/128x128/apps/openclaw-desktop.png
       /usr/share/icons/hicolor/256x256@2/apps/openclaw-desktop.png
       /usr/share/icons/hicolor/512x512/apps/openclaw-desktop.png
     )
-    mapfile -t actual < <(pacman -Ql openclaw-desktop-bin | awk "\$2 !~ /\/$/ {print \$2}" | sort)
+    mapfile -t actual < <(pacman -Ql openclaw-desktop | awk "\$2 !~ /\/$/ {print \$2}" | sort)
     mapfile -t sorted_expected < <(printf "%s\\n" "${expected[@]}" | sort)
     diff -u <(printf "%s\\n" "${sorted_expected[@]}") <(printf "%s\\n" "${actual[@]}")
     for path in "${expected[@]}"; do pacman -Qo "$path"; done
@@ -50,5 +56,5 @@ docker run --rm \
       /etc/openclaw; do
       test ! -e "$forbidden"
     done
-    ! pacman -Ql openclaw-desktop-bin | grep -E "(^|/)(systemd|openclaw\.conf)(/|$)"
+    ! pacman -Ql openclaw-desktop | grep -E "(^|/)(systemd|openclaw\.conf)(/|$)"
   '
